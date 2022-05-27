@@ -65,7 +65,14 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  }
+  else if((r_scause() == 15)||(r_scause() == 13))
+  {
+    uint64 va = r_stval();
+    if (va >= p->sz || handle_cow(p->pagetable, va) != 0)
+      p->killed = 1;
+  }
+   else if((which_dev = devintr()) != 0){
     // ok
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
@@ -82,6 +89,39 @@ usertrap(void)
 
   usertrapret();
 }
+
+//
+//Handle Copy On Write
+//
+int
+handle_cow(pagetable_t pagetable, uint64 va)
+{
+  va = PGROUNDDOWN(va);
+  if(va>=MAXVA)// address is higher than maxVA
+    return -1;
+  pte_t *pte = walk(pagetable, va, 0);
+  if(pte ==0)//page not found
+    return -1;
+
+ if ((*pte & PTE_V) == 0)
+    return -1;
+
+  if ((*pte & PTE_COW) == 0)
+    return 1;
+
+  //allocate a new page, and copy the original content:
+  uint64 originalpage = PTE2PA(*pte);//get original page
+  char * copypage = kalloc();
+  if(copypage==0)//unable to allocate
+    return -1;
+  
+  memmove(copypage, (char *) originalpage, PGSIZE);//copies the originalpage to the copypage (Size of page is 4096)
+  *pte =  PA2PTE(copypage) | ((PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W) ; // obtain the page table entry from the phisycal addres. bitwiseor with the flags, uncheck the COW flag, raise W flag.
+
+  kfree((void *)originalpage);//update the reference counter of the originalpage (remove 1).
+  return 0;
+}
+
 
 //
 // return to user space
