@@ -66,11 +66,11 @@ usertrap(void)
 
     syscall();
   }
-  else if((r_scause() == 15)||(r_scause() == 13))
+  else if((r_scause() == 15)||(r_scause() == 13)) //for pageFault reasons
   {
-    uint64 va = r_stval();
-    if (va >= p->sz || handle_cow(p->pagetable, va) != 0)
-      p->killed = 1;
+    uint64 va = r_stval(); //this is the page that caused the pageFault. The register saves it.
+    if (handle_cow(p->pagetable, va) != 0)
+      p->killed = 1; //if we had a pageFault, and either wasn't COW, or the handle of COW failed - kill process
   }
    else if((which_dev = devintr()) != 0){
     // ok
@@ -96,29 +96,26 @@ usertrap(void)
 int
 handle_cow(pagetable_t pagetable, uint64 va)
 {
-  va = PGROUNDDOWN(va);
-  if(va>=MAXVA)// address is higher than maxVA
+  if(va>=MAXVA)// address is higher than maxVA, protect walk panic (MAXVAplus test)
     return -1;
   pte_t *pte = walk(pagetable, va, 0);
-  if(pte ==0)//page not found
+  if(pte ==0)
     return -1;
 
- if ((*pte & PTE_V) == 0)
-    return -1;
-
-  if ((*pte & PTE_COW) == 0)
+  if ((*pte & PTE_COW) == 0) //if page isn't COW, the trap that led here isn't for that cause, nothing to do
     return 1;
 
-  //allocate a new page, and copy the original content:
-  uint64 originalpage = PTE2PA(*pte);//get original page
-  char * copypage = kalloc();
-  if(copypage==0)//unable to allocate
+  //allocate a new PA, and copy the original PA:
+  uint64 originalPA = PTE2PA(*pte);
+  char * copyPA = kalloc();
+  if(copyPA==0)//unable to allocate
     return -1;
-  
-  memmove(copypage, (char *) originalpage, PGSIZE);//copies the originalpage to the copypage (Size of page is 4096)
-  *pte =  PA2PTE(copypage) | ((PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W) ; // obtain the page table entry from the phisycal addres. bitwiseor with the flags, uncheck the COW flag, raise W flag.
+  uint flags = ((PTE_FLAGS(*pte) & ~PTE_COW) | PTE_W); //uncheck the COW flag, raise W flag.
 
-  kfree((void *)originalpage);//update the reference counter of the originalpage (remove 1).
+  memmove(copyPA, (char *) originalPA, PGSIZE); //copies the originalPA to the copypage
+  *pte =  PA2PTE(copyPA) | flags ; // bitwiseor the page with the updated flags
+
+  kfree((void *)originalPA); //update the reference counter of the originalPA (remove 1).
   return 0;
 }
 

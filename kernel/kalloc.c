@@ -62,7 +62,7 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  //reduce counter by one. If bigger than 0, return. else, continue with original code.
+  //reduce counter by one. If bigger than 0, return. else, continue with original code to free page
   int indexInList = ((uint64)r - KERNBASE)/ PGSIZE;
 
   int currentCounter;
@@ -90,7 +90,7 @@ kfree(void *pa)
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
 void *
-kalloc(void)
+kalloc(void) //create new PA, set page reference in list to 1
 {
   struct run *r;
 

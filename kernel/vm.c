@@ -298,7 +298,7 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 // returns 0 on success, -1 on failure.
 // frees any allocated pages on failure.
 int
-uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
+uvmcopy(pagetable_t old, pagetable_t new, uint64 sz )
 {
   pte_t *pte;
   uint64 pa, i;
@@ -310,14 +310,20 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    if (*pte & PTE_W)
-      *pte = (*pte | PTE_COW) & ~PTE_W;
-    flags = PTE_FLAGS(*pte);
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
-      goto err;
+    if (*pte & PTE_W) //if write flag is on, we need to do COW
+    {
+      *pte = (*pte | PTE_COW) & ~PTE_W;//remove writeflag, and add COW flag. In case of write attempt we will have a trap handled by usertrap.
+      flags = PTE_FLAGS(*pte);
+      if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+        goto err;
+      }
+    }
+    else { // no need to change flag, we only copy the pagetable.
+      if(mappages(new, i, PGSIZE, (uint64)pa, PTE_FLAGS(*pte)) != 0){
+        goto err;
+      }
     }
     increaseCounter(pa); //instead of copying memory and allocating new page, increase counter of refs
-
   }
   return 0;
 
@@ -349,7 +355,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
-    if (handle_cow(pagetable, va0) < 0)
+    if (handle_cow(pagetable, va0) < 0)//in case the page was COW, we want to copy it from kernel to user, so we want to remove the COW flag if it exists and make a copy of the PA.
       return -1;
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
